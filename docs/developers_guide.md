@@ -24,36 +24,11 @@ When building or extending this project (or a similar one), follow this order:
 
 ```mermaid
 flowchart LR
-    subgraph Step1["Step 1: Domain & DB"]
-        D1[accounts.py\nTransaction & Account models]
-        D2[market.py\nPrice providers]
-        D3[database.py\nSQLite schema & helpers]
-    end
-
-    subgraph Step2["Step 2: External APIs"]
-        E1[Polygon.io]
-        E2[LLM APIs\n(OpenRouter, DeepSeek, Grok, Gemini)]
-        E3[Pushover]
-        E4[Brave Search]
-    end
-
-    subgraph Step3["Step 3: MCP Servers"]
-        M1[accounts_server.py]
-        M2[market_server.py / mcp_polygon]
-        M3[push_server.py]
-        M4[External MCPs\n(fetch, Brave, memory)]
-    end
-
-    subgraph Step4["Step 4: Agents & Prompts"]
-        A1[Trader agent\ntraders.py]
-        A2[Researcher agent\ntraders.py + templates.py]
-        A3[mcp_params.py\nMCP wiring]
-    end
-
-    subgraph Step5["Step 5: Orchestrator & UI"]
-        O1[trading_floor.py\nscheduler]
-        U1[app.py\nGradio dashboard]
-    end
+    Step1["Step 1: Domain & DB"]
+    Step2["Step 2: External APIs"]
+    Step3["Step 3: MCP Servers"]
+    Step4["Step 4: Agents & Prompts"]
+    Step5["Step 5: Orchestrator & UI"]
 
     Step1 --> Step2 --> Step3 --> Step4 --> Step5
 ```
