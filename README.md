@@ -15,6 +15,40 @@ Autonomous AI traders that use the **Model Context Protocol (MCP)**, multiple LL
 
 ---
 
+## Very High‑Level Flow (Simplified)
+
+A simple block diagram of the main runtime:
+
+```mermaid
+flowchart LR
+    User["User in Browser"]
+    UI["Gradio UI\n(src/app.py)"]
+    Orchestrator["Trading Orchestrator\n(src/trading_floor.py)"]
+    Traders["Trader & Researcher Agents\n(src/traders.py, templates.py)"]
+    MCP["MCP Servers\n(accounts_server, market_server/mcp_polygon, push_server,\nfetch, Brave, memory)"]
+    Domain["Domain & DB\n(accounts.py, market.py, database.py, SQLite)"]
+    External["External APIs\n(LLMs, Polygon, Pushover, Brave)"]
+
+    User --> UI
+    UI --> Domain
+
+    Orchestrator --> Traders
+    Traders --> MCP
+    MCP --> Domain
+    Domain --> External
+
+    Traders --> External
+```
+
+At a glance:
+
+- The **orchestrator** triggers **trader agents** on a schedule.
+- Traders use **MCP tools** and **LLMs** to research and trade.
+- All state changes go through **domain code** and **SQLite**.
+- The **UI** simply reads from the same DB and logs to show what’s happening.
+
+---
+
 ## Tech Stack & Key Technologies
 
 - **Language & Runtime**
@@ -169,41 +203,7 @@ Both processes can run concurrently: **trading_floor** drives autonomous behavio
 
 ---
 
-## Very High‑Level Flow (Simplified)
-
-A simple block diagram of the main runtime:
-
-```mermaid
-flowchart LR
-    User["User in Browser"]
-    UI["Gradio UI\n(src/app.py)"]
-    Orchestrator["Trading Orchestrator\n(src/trading_floor.py)"]
-    Traders["Trader & Researcher Agents\n(src/traders.py, templates.py)"]
-    MCP["MCP Servers\n(accounts_server, market_server/mcp_polygon, push_server,\nfetch, Brave, memory)"]
-    Domain["Domain & DB\n(accounts.py, market.py, database.py, SQLite)"]
-    External["External APIs\n(LLMs, Polygon, Pushover, Brave)"]
-
-    User --> UI
-    UI --> Domain
-
-    Orchestrator --> Traders
-    Traders --> MCP
-    MCP --> Domain
-    Domain --> External
-
-    Traders --> External
-```
-
-At a glance:
-
-- The **orchestrator** triggers **trader agents** on a schedule.
-- Traders use **MCP tools** and **LLMs** to research and trade.
-- All state changes go through **domain code** and **SQLite**.
-- The **UI** simply reads from the same DB and logs to show what’s happening.
-
----
-
 ## Further Reading
 
-- `docs/architrcture.md` – architecture and diagrams.
+- `docs/HLD.md` – architecture and diagrams.
 - `docs/LLD.md` – detailed low‑level design and call flows.
