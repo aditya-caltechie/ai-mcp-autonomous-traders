@@ -91,20 +91,7 @@ git clone <this-repo-url>
 cd ai-mcp-autonomous-traders
 ```
 
-2. **Create and activate a Python virtual environment (optional but recommended)**
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # on Windows: .venv\Scripts\activate
-```
-
-3. **Install Python dependencies**
-
-If you have a `requirements.txt` or `pyproject.toml`, install with:
-
-```bash
-pip install -r requirements.txt
-```
+2. **Create and activate a Python virtual environment and Install Python dependencies**
 
 > If you are using `uv`, you can instead run:
 >
@@ -137,7 +124,8 @@ Create a `.env` file in the project root (or copy from an example if present) an
 5. **Initialize trader accounts and strategies (optional)**
 
 ```bash
-python -m src.reset
+cd src
+uv run reset.py
 ```
 
 This resets the four trader accounts (Warren, George, Ray, Cathie) with their respective strategies and starting balances.
@@ -151,7 +139,8 @@ This resets the four trader accounts (Warren, George, Ray, Cathie) with their re
 Runs all traders every `RUN_EVERY_N_MINUTES` minutes (default 60), checking market hours unless overridden.
 
 ```bash
-python -m src.trading_floor
+cd src
+uv run trading_floor.py
 ```
 
 This process:
@@ -165,7 +154,8 @@ This process:
 In a separate terminal, run:
 
 ```bash
-python -m src.app
+cd src
+uv run app.py
 ```
 
 This launches a Gradio app in your browser where you can:
