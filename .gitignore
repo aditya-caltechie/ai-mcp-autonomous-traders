@@ -131,3 +131,10 @@ memory.db
 # Ignore Accounts database in capstone project
 6_mcp/accounts.db
 6_mcp/memory/*.db
+
+# Ignore runtime databases in this project
+accounts.db
+src/accounts.db
+src/memory/*.db
+src/memory/*.db-shm
+src/memory/*.db-wal
