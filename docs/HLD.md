@@ -25,8 +25,62 @@ At a high level, the system consists of:
   - Per‑trader memory databases (`memory/{name}.db`) for long‑term MCP memory.
 
 ---
+## Simplified High‑Level Code Flow
 
-## End‑to‑End Flow Diagram
+This simpler diagram focuses just on the main Python entrypoints and how control flows through the code at a high level:
+
+```mermaid
+flowchart LR
+    subgraph User["User"]
+        UI_Start["Run app.py\n(Gradio UI)"]
+        TF_Start["Run trading_floor.py\n(Background loop)"]
+    end
+
+    subgraph UI["UI Process"]
+        AppPy["app.py\nGradio Blocks + TraderView"]
+    end
+
+    subgraph Core["Core Logic"]
+        TF["trading_floor.py\nrun_every_n_minutes()"]
+        TradersPy["traders.py\nTrader.run()"]
+        AccountsPy["accounts.py\nAccount model"]
+        MarketPy["market.py\nget_share_price()"]
+        DBPy["database.py\nsqlite3 (accounts, logs, market)"]
+    end
+
+    subgraph MCP["MCP Servers"]
+        AccSrv["accounts_server.py"]
+        MktSrv["market_server.py or mcp_polygon"]
+        PushSrv["push_server.py"]
+    end
+
+    %% User starts UI and orchestrator
+    UI_Start --> AppPy
+    TF_Start --> TF
+
+    %% UI reads from DB via domain code
+    AppPy -->|"Account.get(), read_log()"| AccountsPy
+    AccountsPy --> DBPy
+
+    %% Orchestrator runs traders
+    TF -->|"asyncio.gather(... Trader.run())"| TradersPy
+
+    %% Traders talk to MCP servers
+    TradersPy -->|"MCP tools/resources"| AccSrv
+    TradersPy --> MktSrv
+    TradersPy --> PushSrv
+
+    %% MCP servers use domain code
+    AccSrv --> AccountsPy
+    MktSrv --> MarketPy
+    PushSrv -->|"Pushover API"| PushSrv
+
+    %% Market and DB
+    MarketPy --> DBPy
+```
+---
+
+## End‑to‑End Detailed Flow Diagram
 
 Overall system data/interaction flow:
 
@@ -102,62 +156,6 @@ flowchart LR
 
     %% Tracing
     Orchestrator -->|"add_trace_processor(LogTracer)"| Service_Tracers
-```
-
----
-
-## Simplified High‑Level Code Flow
-
-This simpler diagram focuses just on the main Python entrypoints and how control flows through the code at a high level:
-
-```mermaid
-flowchart LR
-    subgraph User["User"]
-        UI_Start["Run app.py\n(Gradio UI)"]
-        TF_Start["Run trading_floor.py\n(Background loop)"]
-    end
-
-    subgraph UI["UI Process"]
-        AppPy["app.py\nGradio Blocks + TraderView"]
-    end
-
-    subgraph Core["Core Logic"]
-        TF["trading_floor.py\nrun_every_n_minutes()"]
-        TradersPy["traders.py\nTrader.run()"]
-        AccountsPy["accounts.py\nAccount model"]
-        MarketPy["market.py\nget_share_price()"]
-        DBPy["database.py\nsqlite3 (accounts, logs, market)"]
-    end
-
-    subgraph MCP["MCP Servers"]
-        AccSrv["accounts_server.py"]
-        MktSrv["market_server.py or mcp_polygon"]
-        PushSrv["push_server.py"]
-    end
-
-    %% User starts UI and orchestrator
-    UI_Start --> AppPy
-    TF_Start --> TF
-
-    %% UI reads from DB via domain code
-    AppPy -->|"Account.get(), read_log()"| AccountsPy
-    AccountsPy --> DBPy
-
-    %% Orchestrator runs traders
-    TF -->|"asyncio.gather(... Trader.run())"| TradersPy
-
-    %% Traders talk to MCP servers
-    TradersPy -->|"MCP tools/resources"| AccSrv
-    TradersPy --> MktSrv
-    TradersPy --> PushSrv
-
-    %% MCP servers use domain code
-    AccSrv --> AccountsPy
-    MktSrv --> MarketPy
-    PushSrv -->|"Pushover API"| PushSrv
-
-    %% Market and DB
-    MarketPy --> DBPy
 ```
 
 ---
