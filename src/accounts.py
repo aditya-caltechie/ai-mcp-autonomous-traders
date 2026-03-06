@@ -49,6 +49,26 @@ class Account(BaseModel):
         return cls(**fields)
     
     
+    # NOTE: For any BaseModel, model_dump() is Pydantic’s method that returns a plain Python dict 
+    # of all the model’s fields and their values, recursively converting nested models
+    # In this case, account.model_dump() produces something like:
+    # {
+    #     "name": "warren",
+    #     "balance": 10000.0,
+    #     "strategy": "...long strategy text...",
+    #     "holdings": {"NVDA": 10, "AAPL": 5},
+    #     "transactions": [
+    #         {"symbol": "NVDA", "quantity": 10, "price": 100.0, "timestamp": "...", "rationale": "..."},
+    #         ...
+    #     ],
+    #     "portfolio_value_time_series": [("2026-03-04 09:00:00", 10000.0), ...],
+    # }
+    # This is what write_account JSON‑serializes and stores in SQLite
+    #
+    # So model_dump() “has all the data” because Pydantic tracks every field defined on 
+    # the Account model (including nested Transaction models) and exports them into a 
+    # serializable dictionary.
+
     def save(self):
         write_account(self.name.lower(), self.model_dump())
 

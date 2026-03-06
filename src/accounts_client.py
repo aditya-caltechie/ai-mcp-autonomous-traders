@@ -21,13 +21,27 @@ async def call_accounts_tool(tool_name, tool_args):
             result = await session.call_tool(tool_name, tool_args)
             return result
             
+# Read the full account JSON for a given trader name.
+# This uses the same accounts_server.py MCP server, but reads from the
+# accounts://accounts_server/{name} resource, which is backed by accounts.db.
+# The server serializes the Account (from accounts.py) to JSON; we return
+# that JSON string so callers can parse or trim fields as needed.
 async def read_accounts_resource(name):
     async with stdio_client(params) as streams:
         async with mcp.ClientSession(*streams) as session:
             await session.initialize()
             result = await session.read_resource(f"accounts://accounts_server/{name}")
             return result.contents[0].text
-        
+
+# Read the long-form strategy text for a given trader name.
+# This client talks to accounts_server.py by running `uv run accounts_server.py`
+# over stdio. Inside, we:
+#   - start the MCP server with stdio_client(params)
+#   - wrap the streams in mcp.ClientSession and initialize the session
+#   - call read_resource("accounts://strategy/{name}") to fetch the strategy
+# The source of truth lives in accounts.db (via accounts.py/database.py);
+# reset.py writes each trader's strategy there, and accounts_server.py exposes
+# it as the accounts://strategy/{name} resource. We return that strategy string.
 async def read_strategy_resource(name):
     async with stdio_client(params) as streams:
         async with mcp.ClientSession(*streams) as session:
