@@ -1,3 +1,4 @@
+from contextlib import AsyncExitStack
 from accounts_client import read_accounts_resource, read_strategy_resource
 from tracers import make_trace_id
 from agents import Agent, Tool, Runner, OpenAIChatCompletionsModel, trace
@@ -74,6 +75,28 @@ async def get_researcher_tool(mcp_servers, model_name) -> Tool:
     return researcher.as_tool(tool_name="Researcher", tool_description=research_tool())
 
 
+# ---------------------------------------------------------------------------
+# MCP server lifecycle and context handling (why AsyncExitStack)
+#
+# Each MCPServerStdio is an async context manager. To use it we must "enter"
+# its context; that is when the subprocess starts and connect() runs.
+# If we only construct MCPServerStdio(...) without entering the context,
+# the server is never started and tool/resource calls fail with
+# "Server not initialized. Make sure you call connect() first."
+#
+# Lifecycle:
+#   1. enter_async_context(MCPServerStdio(...)) → __aenter__ runs → subprocess
+#      starts, connect() runs.
+#   2. We pass the connected server objects to run_agent (and thus to the agents).
+#   3. When we exit the "async with AsyncExitStack()" block → __aexit__ runs
+#      for each server in reverse order → disconnect, cleanup, subprocesses exit.
+#
+# AsyncExitStack lets us enter multiple async context managers in one block
+# without nesting. We have a dynamic number of servers (from mcp_params), so
+# we can't write N nested "async with" blocks. The stack handles enter/exit
+# for all of them in one place.
+# ---------------------------------------------------------------------------
+
 class Trader:
     """Single autonomous trader (e.g. Warren, George, Ray, Cathie).
 
@@ -135,38 +158,29 @@ class Trader:
         )
         # 5d) Let the Runner drive a multi-turn conversation with tools.
         await Runner.run(self.agent, message, max_turns=MAX_TURNS)
-        # 5e) Clean up MCP servers when done. Good practice to avoid resource leaks.
 
 
 
-    # Step 0 (from this class's perspective): prepare all MCP servers the
-    # Trader and Researcher agents will use, then hand them into run_agent.
-    # We follow the lab-4 pattern: construct MCPServerStdio instances directly
-    # and let this run own them for its lifetime.
+    # Step 0: Start all MCP servers (enter context → connect()), then run the agent.
+    # See comment block above for lifecycle and why AsyncExitStack is used.
     async def run_with_mcp_servers(self):
-        # Create MCP servers for trading actions (accounts, push, market).
-        # 0a) Trader MCP servers (internal + external):
-        #   - uv run accounts_server.py       (internal; talks to accounts.db)
-        #   - uv run push_server.py           (internal; Pushover notifications)
-        #   - Polygon mcp_polygon OR          (external; real market data)
-        #     uv run market_server.py         (internal fallback market data)
-        trader_mcp_servers = [
-            MCPServerStdio(params, client_session_timeout_seconds=120)
-            for params in trader_mcp_server_params
-        ]
-
-        # Create MCP servers for research (fetch, Brave search, memory).
-        # 0b) Researcher MCP servers (all external-ish / sidecar services):
-        #   - uvx mcp-server-fetch                    (generic HTTP fetch)
-        #   - npx @modelcontextprotocol/server-brave-search (Brave Search API)
-        #   - npx mcp-memory-libsql with ./memory/{name}.db (long-term memory)
-        researcher_mcp_servers = [
-            MCPServerStdio(params, client_session_timeout_seconds=120)
-            for params in researcher_mcp_server_params(self.name)
-        ]
-
-        # 0c) Finally, run the trader agent using these MCP servers.
-        await self.run_agent(trader_mcp_servers, researcher_mcp_servers)
+        async with AsyncExitStack() as stack:
+            # 0a) Trader MCP servers (accounts, push, market).
+            trader_mcp_servers = [
+                await stack.enter_async_context(
+                    MCPServerStdio(params, client_session_timeout_seconds=120)
+                )
+                for params in trader_mcp_server_params
+            ]
+            # 0b) Researcher MCP servers (fetch, Brave search, memory).
+            researcher_mcp_servers = [
+                await stack.enter_async_context(
+                    MCPServerStdio(params, client_session_timeout_seconds=120)
+                )
+                for params in researcher_mcp_server_params(self.name)
+            ]
+            # 0c) Run the agent; servers stay connected until we exit the stack.
+            await self.run_agent(trader_mcp_servers, researcher_mcp_servers)
 
     async def run_with_trace(self):
         # Wrap a single trader cycle in a named trace so we can inspect
