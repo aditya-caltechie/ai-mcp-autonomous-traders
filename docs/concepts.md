@@ -3,8 +3,14 @@
 This document explains the basics of **building** and **using** MCP (Model Context Protocol) servers, with two concrete examples. Tool usage is driven by **instructions** (agent behavior) and **request prompts** (user query).
 
 ---
+## 1. Basics: What Is an MCP Server?
 
-## 0. Introduction
+An MCP server exposes **tools** (and optionally **resources**, **prompts**) to an AI agent. The agent runs in a client (e.g. OpenAI Agents SDK); the client talks to the server over **stdio** or **SSE**. The agent decides **when** and **which** tools to call based on:
+
+1. **Instructions** — system/agent instructions that describe the agent’s role and how it should use tools.
+2. **Request** — the user’s message (e.g. “What’s the latest news on Tesla?”).
+
+So: **instructions + request → agent chooses tools → server runs them → agent uses results in the reply.**
 
 **MCP is not a framework for building agents.** It is a **protocol** — a standard way for an agent (or any client) to talk to services that expose capabilities. Think of it as a simple, consistent way to integrate **tools**, **resources**, and **prompts** into your agent stack. You still build agents with an agent framework (e.g. OpenAI Agents SDK); MCP defines how those agents discover and call tools, read resources, and use prompt templates.
 
@@ -57,20 +63,9 @@ In both cases, the same protocol runs on top; only the wire format and process m
 
 ---
 
-## MCP Server = Multiple Tools (and More) for Agents
+### MCP Server = Multiple Tools (and More) for Agents
 
 An MCP server exposes one or more **tools** — callable functions with a name, description, and input schema. When you build an agent, you attach one or more MCP servers to it. The agent sees the union of all tools from those servers and, based on **instructions** and the **user request**, decides when to call which tool. So: the server does not “run” the agent; it **provides** the tools the agent uses. Resources and prompts (if the server supports them) extend this same idea: the agent can read resources or fill in prompt templates as part of its workflow.
-
----
-
-## 1. Basics: What Is an MCP Server?
-
-An MCP server exposes **tools** (and optionally **resources**, **prompts**) to an AI agent. The agent runs in a client (e.g. OpenAI Agents SDK); the client talks to the server over **stdio** or **SSE**. The agent decides **when** and **which** tools to call based on:
-
-1. **Instructions** — system/agent instructions that describe the agent’s role and how it should use tools.
-2. **Request** — the user’s message (e.g. “What’s the latest news on Tesla?”).
-
-So: **instructions + request → agent chooses tools → server runs them → agent uses results in the reply.**
 
 ---
 
