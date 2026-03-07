@@ -2,6 +2,21 @@
 
 This document explains the project from the ground up: build order, prerequisites, what each component does, and how they combine into `traders.py` and `trading_floor.py`.
 
+---
+
+## Two main players per trader (mindset)
+
+Each trader is built from **two agents**:
+
+| Player | Role | What it uses |
+|--------|------|----------------|
+| **Trading Agent** | Decides what to trade, executes orders, rebalances, sends push notifications. | **MCP servers:** `accounts_server` (account tools + resources; account/strategy are also loaded into the initial message via `accounts_client`), `push_server`, market (`market_server` or `mcp_polygon`). **One tool:** the Researcher (Research Agent wrapped as a tool). |
+| **Research Agent** | Does deeper market/news research when the Trader asks. | **MCP servers only** (each exposes tools): `mcp-server-fetch` (HTTP fetch), `@modelcontextprotocol/server-brave-search` (Brave Search), `mcp-memory-libsql` (per‑trader memory at `./memory/{name}.db`). |
+
+The **Research Agent is wrapped as a tool** and the **Trader Agent uses it as a tool**. Flow: build Researcher agent (with researcher MCP servers) → expose as tool via `researcher.as_tool(...)` → build Trader agent with `tools=[tool]` and `mcp_servers=trader_mcp_servers`. See `traders.py` (e.g. `get_researcher`, `get_researcher_tool`, `create_agent`) and `mcp_params.py`.
+
+---
+
 ### Quick: How to read this project
 
 ```
