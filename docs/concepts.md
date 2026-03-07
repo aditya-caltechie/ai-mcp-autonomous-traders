@@ -4,6 +4,77 @@ This document explains the basics of **building** and **using** MCP (Model Conte
 
 ---
 
+## Introduction
+
+**MCP is not a framework for building agents.** It is a **protocol** — a standard way for an agent (or any client) to talk to services that expose capabilities. Think of it as a simple, consistent way to integrate **tools**, **resources**, and **prompts** into your agent stack. You still build agents with an agent framework (e.g. OpenAI Agents SDK); MCP defines how those agents discover and call tools, read resources, and use prompt templates.
+
+---
+
+## How MCP Works: Three Components
+
+MCP has three main pieces:
+
+1. **MCP Client** — The application or agent runtime (e.g. your app using the OpenAI Agents SDK) that wants to use tools, resources, or prompts. The agent runs inside the client.
+2. **MCP Server** — The process that exposes those capabilities. It can run locally on your machine or on a remote host. It provides **tools** (callable functions), **resources** (readable URIs), and optionally **prompts** (templates).
+3. **Transport** — How the client and server communicate. The protocol supports two mechanisms: **stdio** (for local subprocess servers) and **SSE** (for remote or in-process HTTP-based servers).
+
+Most often, MCP servers run on your machine: you download or build them and run them locally. Clients on the same host connect to them. Optionally, a client can also talk to a **remote** MCP server over the network; that server may in turn call external APIs.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Your computer (Host)                                                 │
+│                                                                      │
+│   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐                │
+│   │ MCP Client  │   │ MCP Client  │   │ MCP Client  │  ← Agent runs  │
+│   └──────┬──────┘   └──────┬──────┘   └──────┬──────┘    here        │
+│          │ stdio / SSE     │                 │                        │
+│   ┌──────▼──────┐   ┌──────▼──────┐                                  │
+│   │ MCP Server  │   │ MCP Server  │   (local: tools, resources)       │
+│   └─────────────┘   └─────────────┘                                  │
+└─────────────────────────────────────────────────────────────────────┘
+          │ SSE (when using a remote server)
+          ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Remote server                                                        │
+│   ┌─────────────┐          ┌─────────────┐                          │
+│   │ MCP Server  │ ────────►│ External API│  (e.g. Brave, Polygon)   │
+│   └─────────────┘          └─────────────┘                          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+*A visual version of this layout appears in the course material (“MCP Servers most often run on your box”).*
+
+---
+
+## Transport: stdio vs SSE
+
+The client and server need a way to exchange messages. MCP defines two transports:
+
+- **stdio** — The server runs as a **local subprocess**. The client spawns it (e.g. `uv run market_server.py` or `npx -y @modelcontextprotocol/server-brave-search`) and communicates over standard input/output. This is the typical choice for “run on your box” servers and is what we use in this project.
+- **SSE (Server-Sent Events)** — The server is an **HTTP endpoint**. The client connects over HTTP using SSE. This is used for **remote** MCP servers or when the server is not a subprocess (e.g. a long-running service or a hosted MCP).
+
+In both cases, the same protocol runs on top; only the wire format and process model differ.
+
+---
+
+## MCP Server = Multiple Tools (and More) for Agents
+
+An MCP server exposes one or more **tools** — callable functions with a name, description, and input schema. When you build an agent, you attach one or more MCP servers to it. The agent sees the union of all tools from those servers and, based on **instructions** and the **user request**, decides when to call which tool. So: the server does not “run” the agent; it **provides** the tools the agent uses. Resources and prompts (if the server supports them) extend this same idea: the agent can read resources or fill in prompt templates as part of its workflow.
+
+---
+
+## MCP Marketplace: Remote and Discoverable Servers
+
+Beyond running open-source MCP servers locally, you can use **remote** or **hosted** MCP servers. These are often listed or offered in MCP-focused directories and marketplaces, so you can discover and connect to them without hosting the server yourself. Examples of such places:
+
+- **[mcp.so](https://mcp.so)** — MCP directory and resources.
+- **[Glamira.ai MCP](https://glamara.ai/mcp)** — MCP-related offerings and integrations.
+- **[Smithery](https://smithery.ai/)** — Platform for AI tools and MCP servers.
+
+Connecting to a remote server usually means using the **SSE** transport and the URL (and any auth) provided by the marketplace or provider. Your MCP client (e.g. your agent runtime) then talks to that URL instead of starting a local subprocess.
+
+---
+
 ## 1. Basics: What Is an MCP Server?
 
 An MCP server exposes **tools** (and optionally **resources**, **prompts**) to an AI agent. The agent runs in a client (e.g. OpenAI Agents SDK); the client talks to the server over **stdio** or **SSE**. The agent decides **when** and **which** tools to call based on:
