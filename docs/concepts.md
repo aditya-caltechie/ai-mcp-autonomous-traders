@@ -201,6 +201,22 @@ if __name__ == "__main__":
     mcp.run(transport='stdio')
 ```
 
+where `get_share_price` was called from internal file market.py which make a REST API call to polygon for getting the market prices eventually. Below is just snippet:
+```
+def get_all_share_prices_polygon_eod() -> dict[str, float]:
+
+    client = RESTClient(polygon_api_key)
+
+    # Get the previous close price for SPY using the Polygon API
+    probe = client.get_previous_close_agg("SPY")[0]
+    last_close = datetime.fromtimestamp(probe.timestamp / 1000, tz=timezone.utc).date()
+
+    # Get the daily aggregated prices for all stocks using the Polygon API
+    results = client.get_grouped_daily_aggs(last_close, adjusted=True, include_otc=False)
+    return {result.ticker: result.close for result in results}
+    
+```
+
 Steps in short:
 
 1. Create `FastMCP("market_server")`.
