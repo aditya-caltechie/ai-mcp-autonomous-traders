@@ -1,6 +1,27 @@
 # MCP Server Concepts — Build and Use
 
-This document explains the basics of **building** and **using** MCP (Model Context Protocol) servers, with two concrete examples. Tool usage is driven by **instructions** (agent behavior) and **request prompts** (user query).
+This document explains the basics of **building** and **using** MCP (Model Context Protocol) servers, with concrete examples. Tool usage is driven by **instructions** (agent behavior) and **request prompts** (user query).
+
+**This project builds three home-made MCP servers** in `src/`:
+
+| Server | File | Role |
+|--------|------|------|
+| **Accounts** | `accounts_server.py` | Account balance, holdings, buy/sell, strategy (tools + resources) |
+| **Market** | `market_server.py` | Share price lookup (calls Polygon/cache) |
+| **Push** | `push_server.py` | Push notifications (calls Pushover API) |
+
+They are used by the trading orchestrator and agents; the examples below (Brave Search, market server, push server) show the same build-and-use pattern.
+
+**We also use several external MCP servers** (not built in this repo). They are started via `mcp_params.py` and used by the **Researcher** agent (and optionally the **Trader** for market data):
+
+| External MCP | Role | Used by |
+|--------------|------|---------|
+| **Brave Search** (`@modelcontextprotocol/server-brave-search`) | Web and local search; news, articles | Researcher |
+| **Polygon** (`mcp_polygon` from polygon-io) | Market data (aggs, snapshots, etc.); optional, for paid/realtime plans | Trader (when configured) |
+| **mcp-server-fetch** | HTTP fetch (fetch URL content) | Researcher |
+| **mcp-memory-libsql** | Per-trader persistent memory (entities, relations) | Researcher |
+
+Our home-made **market_server.py** wraps Polygon (or cache) for the free/EOD case; when using a paid Polygon plan, we can switch to the full **mcp_polygon** server instead. For full low-level detail (how each server is configured, which tools they expose, and how agents call them), see the [Low-Level Design (LLD)](https://github.com/aditya-caltechie/ai-mcp-autonomous-traders/blob/main/docs/LLD.md) doc — especially **§2 MCP Configuration** and **§8 Integrated View** (diagram below mirrors that section).
 
 ---
 ## 1. Basics: What Is an MCP Server?
@@ -77,7 +98,92 @@ An MCP server exposes one or more **tools** — callable functions with a name, 
 | **Local → web** | Runs locally, calls a web API | Brave Search, Polygon |
 | **Remote** | Hosted elsewhere; less common | Anthropic/Cloudflare hosted MCPs |
 
-We focus on **local** and **local → web**; both are started as child processes (e.g. `npx`, `uv run`).
+We focus on **local** and **local → web**; both are started as child processes (e.g. `npx`, `uv run`). In this repo, **accounts_server** is local-only (SQLite); **market_server** and **push_server** are local processes that call external APIs (Polygon, Pushover).
+
+### 2.1 Integrated view: modules and MCP dependencies
+
+The diagram below is the same **integrated view** as in [LLD §8](https://github.com/aditya-caltechie/ai-mcp-autonomous-traders/blob/main/docs/LLD.md). It summarizes which modules depend on MCP servers, DB, and external APIs.
+
+```mermaid
+flowchart LR
+    subgraph Entrypoints["Entrypoints"]
+        App["app.py\n(UI)"]
+        TF["trading_floor.py\n(orchestrator)"]
+        Reset["reset.py\n(initializer)"]
+    end
+
+    subgraph Agents["Agents & Tools"]
+        TradersMod["traders.py\nTrader agent"]
+        Templates["templates.py\nprompts/messages"]
+        Tracers["tracers.py\nLogTracer"]
+    end
+
+    subgraph MCPClients["MCP Clients & Params"]
+        MCPParams["mcp_params.py"]
+        AccClient["accounts_client.py"]
+    end
+
+    subgraph MCPServers["MCP Servers"]
+        AccSrv["accounts_server.py"]
+        MktSrv["market_server.py or mcp_polygon"]
+        PushSrv["push_server.py"]
+        ExtMCP["mcp-server-fetch,\nBrave, mcp-memory-libsql"]
+    end
+
+    subgraph Domain["Domain & Infra"]
+        Accounts["accounts.py"]
+        Market["market.py"]
+        DB["database.py\nSQLite: accounts, logs, market"]
+        Util["util.py\nCSS/JS/Color"]
+    end
+
+    subgraph External["External Services"]
+        Polygon["Polygon REST API"]
+        Pushover["Pushover API"]
+        LLMs["LLM APIs via AsyncOpenAI\n(OpenRouter, DeepSeek, Grok, Gemini)"]
+        BraveAPI["Brave Search API"]
+    end
+
+    %% Entrypoints
+    App --> Util
+    App --> Accounts
+    App --> DB
+
+    TF --> TradersMod
+    Reset --> Accounts
+    Reset --> DB
+
+    %% Agents
+    TradersMod --> Templates
+    TradersMod --> Tracers
+    TradersMod --> MCPParams
+    TradersMod --> AccClient
+    TradersMod --> LLMs
+
+    %% MCP wiring
+    MCPParams --> AccSrv
+    MCPParams --> MktSrv
+    MCPParams --> PushSrv
+    MCPParams --> ExtMCP
+
+    AccClient --> AccSrv
+
+    %% Servers to domain & externals
+    AccSrv --> Accounts
+    Accounts --> DB
+
+    MktSrv --> Market
+    Market --> DB
+    Market --> Polygon
+
+    PushSrv --> Pushover
+
+    %% External MCP to Brave & memory
+    ExtMCP --> BraveAPI
+    ExtMCP --> DB
+```
+
+For per-module call flow and sequence diagrams, see the full [Low-Level Design (LLD)](https://github.com/aditya-caltechie/ai-mcp-autonomous-traders/blob/main/docs/LLD.md).
 
 ---
 
@@ -276,19 +382,120 @@ So again: **instructions + request drive tool use.**
 
 ---
 
-## 6. Summary: Instructions and Request
+## 6. Example 3: Push Server (Notify via External API)
 
-- **Instructions** = agent’s role and how it may use tools (e.g. “search the web and summarize”, “answer stock market questions”).
+Here we **build** an MCP server that exposes one tool: send a push notification. The server runs locally but calls an external API (Pushover). Same pattern: build with FastMCP, then use via instructions + request.
+
+### 6.1 How we build it
+
+- Use **FastMCP** and one tool that takes a structured argument (Pydantic model).
+- The tool POSTs to Pushover’s API; credentials come from env (`PUSHOVER_USER`, `PUSHOVER_TOKEN`).
+
+**File: `push_server.py`**
+
+```python
+import os
+from dotenv import load_dotenv
+import requests
+from pydantic import BaseModel, Field
+from mcp.server.fastmcp import FastMCP
+
+load_dotenv(override=True)
+
+pushover_user = os.getenv("PUSHOVER_USER")
+pushover_token = os.getenv("PUSHOVER_TOKEN")
+pushover_url = "https://api.pushover.net/1/messages.json"
+
+mcp = FastMCP("push_server")
+
+class PushModelArgs(BaseModel):
+    message: str = Field(description="A brief message to push")
+
+@mcp.tool()
+def push(args: PushModelArgs):
+    """Send a push notification with this brief message"""
+    print(f"Push: {args.message}")
+    payload = {"user": pushover_user, "token": pushover_token, "message": args.message}
+    requests.post(pushover_url, data=payload)
+    return "Push notification sent"
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+```
+
+Steps in short:
+
+1. Create `FastMCP("push_server")`.
+2. Register a tool with `@mcp.tool()`; use a Pydantic model for arguments so the client gets a clear schema.
+3. Implement the handler: send the message to Pushover, return a confirmation.
+4. Run with `mcp.run(transport='stdio')`.
+
+Set `PUSHOVER_USER` and `PUSHOVER_TOKEN` in `.env` (from [pushover.net](https://pushover.net/)).
+
+### 6.2 What tools are available
+
+| Tool | Purpose |
+|------|--------|
+| `push` | Send a push notification. Input: `message` (string). Output: confirmation text. |
+
+So: **one tool** for notifications; the server is “local → web” (calls Pushover API).
+
+### 6.3 How we use them: instructions + request
+
+**Instructions** (when the agent should notify):
+
+```python
+instructions = (
+    "You are a trading assistant. When you complete a significant trade or rebalance, "
+    "use the push tool once to send a brief summary to the user."
+)
+```
+
+**Request** (example that leads to a notification):
+
+```python
+request = "I just bought 10 shares of AAPL. Notify me with a one-line summary."
+```
+
+**Run:**
+
+```python
+params = {"command": "uv", "args": ["run", "push_server.py"]}
+
+async with MCPServerStdio(params=params, client_session_timeout_seconds=60) as mcp_server:
+    agent = Agent(
+        name="agent",
+        instructions=instructions,
+        model="gpt-4.1-mini",
+        mcp_servers=[mcp_server],
+    )
+    result = await Runner.run(agent, request)
+```
+
+Flow:
+
+1. **Instructions** say: use the push tool for significant events and send a brief summary.
+2. **Request** describes an action (“I just bought…”) and asks for a notification.
+3. The model infers it should notify → calls `push(message="...")` with a short summary.
+4. The server POSTs to Pushover; the user gets the notification.
+
+So again: **instructions + request drive tool use.**
+
+---
+
+## 7. Summary: Instructions and Request
+
+- **Instructions** = agent’s role and how it may use tools (e.g. “search the web and summarize”, “answer stock market questions”, “notify with push when significant”).
 - **Request** = user message; the more specific it is (e.g. “latest Tesla news”, “Apple share price”), the more likely the right tool is used.
 - The **model** decides which tools to call and with what arguments; we don’t call tools by name in code. We only configure the server, pass instructions + request, and run the agent.
 
 ### Quick reference
 
-| Step | Brave Search | Our market_server |
-|------|----------------|-------------------|
-| Run server | `npx -y @modelcontextprotocol/server-brave-search` + `BRAVE_API_KEY` | `uv run market_server.py` |
-| Tools | `brave_web_search`, `brave_local_search` | `lookup_share_price` |
-| Use | Instructions: “search web and summarize”; Request: “latest Tesla news” | Instructions: “answer stock market questions”; Request: “Apple share price?” |
+| Step | Brave Search | Our market_server | Our push_server |
+|------|----------------|-------------------|-----------------|
+| Run server | `npx -y @modelcontextprotocol/server-brave-search` + `BRAVE_API_KEY` | `uv run market_server.py` | `uv run push_server.py` |
+| Tools | `brave_web_search`, `brave_local_search` | `lookup_share_price` | `push` |
+| Use | Instructions: “search web and summarize”; Request: “latest Tesla news” | Instructions: “answer stock market questions”; Request: “Apple share price?” | Instructions: “notify with push when significant”; Request: “I bought 10 AAPL, notify me” |
 
 For more on how this project wires MCP into traders and researchers, see **`docs/LLD.md`** and **`AGENTS.md`**.
 
