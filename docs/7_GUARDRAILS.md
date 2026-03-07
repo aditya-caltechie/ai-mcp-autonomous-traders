@@ -4,6 +4,31 @@ This project **does not currently implement explicit guardrails** beyond basic c
 
 ---
 
+## What are guardrails?
+
+**Guardrails** are rules and checks that restrict what the system is allowed to do. They sit between the agent (or any caller) and the actual execution of actions—such as placing a trade or changing strategy. Guardrails can:
+
+- **Validate inputs** before they are used (e.g. symbol format, quantity range, non-empty rationale).
+- **Enforce limits** (e.g. max order size, max position size, daily trade count).
+- **Block disallowed actions** (e.g. tickers not on an allowlist, or trading when a kill switch is on).
+- **Apply risk controls** (e.g. pause trading after a drawdown, or when market is closed).
+
+They are implemented in code (and sometimes in prompts as soft guidance) so that even if the LLM suggests a bad or extreme action, the system refuses to execute it.
+
+---
+
+## Why guardrails are important and needed
+
+- **LLMs are non-deterministic and can err.** A model might output `quantity: 10000` instead of `10`, or choose an invalid symbol. Without guardrails, a single bad tool call can move large size or corrupt state.
+- **Autonomous agents act without human approval.** This project runs traders on a schedule; there is no human in the loop on each order. Guardrails are the main way to cap damage from bugs, prompt drift, or model mistakes.
+- **Trading has real risk.** Even with simulated accounts, the logic is the same as for real money. Order size limits, position limits, and kill switches prevent runaway behavior (e.g. thousands of orders in one run).
+- **Compliance and audit.** Allowlists, blocklists, and “trading paused” flags support policy (e.g. “only these symbols”) and incident response (e.g. disable trading immediately).
+- **Production readiness.** A system that can say “no” to invalid or dangerous requests is safer to deploy and operate than one that blindly executes whatever the agent asks.
+
+In short: guardrails turn an autonomous trading system from “do whatever the agent says” into “do only what is allowed and within limits,” which is essential for safety and control.
+
+---
+
 ## Current behavior (no guardrails)
 
 - **Accounts** (`accounts.py`): `buy_shares` rejects if cost > balance or symbol price is 0; `sell_shares` rejects if quantity > holdings. No position limits, ticker allowlist, or order size caps.

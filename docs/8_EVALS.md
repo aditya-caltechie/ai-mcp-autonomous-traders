@@ -4,20 +4,35 @@ This project currently **does not include a formal eval suite**. This document o
 
 ---
 
+## What are evals?
+
+**Evals** (evaluations) are tests that check whether the system behaves as intended. For an agentic trading system, evals can be:
+
+- **Deterministic:** Unit and integration tests (e.g. “when balance is too low, `buy_shares` raises ValueError”) that don’t call the LLM. They use mocks and fixed inputs and run quickly in CI.
+- **LLM-in-the-loop:** Tests that run the real agent (or Researcher) with a fixed scenario and then assert on behavior—e.g. “the agent called `get_holdings` before placing a trade,” or “the final response includes a rationale.” These are slower and can be flaky but catch prompt and model regressions.
+- **Scenario-based:** End-to-end checks like “given an account with zero balance and strategy ‘preserve capital,’ the agent does not place any buy” or “the agent uses the Researcher tool before trading.” They validate high-level flows and safety properties.
+
+Evals are the main way to lock in correct behavior, catch regressions after code or prompt changes, and gain confidence before deploying updates.
+
+---
+
+## Why evals are important and needed
+
+- **Non-determinism.** LLM outputs and tool sequences vary. Evals help you notice when something breaks (e.g. “the agent stopped using research before trading” or “it no longer checks balance first”).
+- **Prompt and template drift.** Changes to `templates.py` or system instructions can change behavior in subtle ways. Evals act as regression tests: if a change breaks a desired behavior, the eval fails and you fix it before release.
+- **MCP and tools.** Tool names, schemas, and server availability change. Evals verify that the agent still discovers the right tools and that each tool returns the expected shape and semantics (e.g. `get_balance` returns a number, `buy_shares` rejects insufficient funds).
+- **Safety and correctness.** Evals can encode rules like “no sell without holdings,” “no buy with insufficient balance,” “every order has a non-empty rationale.” They complement guardrails by checking that the agent (and the system) actually obeys them in practice.
+- **Confidence for production.** A suite of evals—especially deterministic ones in CI—makes it safer to refactor, add guardrails, or change prompts, because you get immediate feedback when behavior regresses.
+
+In short: evals answer “did we break anything?” and “does the system still do what we expect?” They are essential for maintaining and improving an autonomous trading system over time.
+
+---
+
 ## Current state
 
 - **Unit tests**: `tests/test_accounts.py` covers `Account`, `Transaction`, deposit/withdraw/report. No agent or MCP behavior is tested.
 - **No LLM evals**: No regression tests on prompts, tool choice, or final outputs.
 - **No scenario evals**: No end-to-end “given this account and strategy, the agent should do X” tests.
-
----
-
-## Why evals matter here
-
-- **Non-determinism**: Model outputs and tool sequences vary; evals help catch regressions (e.g. “agent stopped using research before trading”).
-- **Prompt drift**: Changes to `templates.py` or instructions can change behavior; evals lock in desired behavior.
-- **MCP and tools**: Tool schemas and server availability change; evals verify the agent still discovers and uses the right tools.
-- **Safety and correctness**: Evals can assert “no sell without holdings”, “no buy with insufficient balance”, “rationale present”, etc.
 
 ---
 
