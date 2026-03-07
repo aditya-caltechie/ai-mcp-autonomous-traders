@@ -201,7 +201,7 @@ if __name__ == "__main__":
     mcp.run(transport='stdio')
 ```
 
-where `get_share_price` was called from internal file market.py which make a REST API call to polygon for getting the market prices eventually. Below is just snippet:
+where `get_share_price` was called from internal file market.py , which eveyually calls `get_all_share_prices_polygon_eod` - making a REST API call to polygon for getting the market prices eventually. Below is just snippet:
 
 ```python
 def get_all_share_prices_polygon_eod() -> dict[str, float]:
