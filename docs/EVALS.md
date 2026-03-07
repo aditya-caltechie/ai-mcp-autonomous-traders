@@ -112,7 +112,292 @@ async def test_buy_shares_rejects_insufficient_funds():
 
 ---
 
-## 3. Running evals
+## 3. Specific implementation examples (where and how in `src/`)
+
+The following are concrete insertion points and code patterns using the current codebase.
+
+### 3.1 `tests/test_accounts.py` — extend account and order evals
+
+**Existing pattern:** `DummyAccount` overrides `save()` to avoid DB writes; tests patch `src.accounts.get_share_price` and `src.accounts.write_log` (see `test_report_returns_valid_json`).
+
+**Add evals for `buy_shares` and `sell_shares` (src/accounts.py lines 97–145):**
+
+```python
+# tests/test_accounts.py — add these
+
+def test_buy_shares_insufficient_funds(monkeypatch):
+    monkeypatch.setattr("src.accounts.get_share_price", lambda s: 100.0)
+    monkeypatch.setattr("src.accounts.write_log", lambda *a, **k: None)
+    acct = DummyAccount(
+        name="eval_buy", balance=50.0, strategy="", holdings={},
+        transactions=[], portfolio_value_time_series=[],
+    )
+    with pytest.raises(ValueError, match="Insufficient funds"):
+        acct.buy_shares("AAPL", 1, "test")
+
+def test_buy_shares_unrecognized_symbol(monkeypatch):
+    monkeypatch.setattr("src.accounts.get_share_price", lambda s: 0.0)
+    monkeypatch.setattr("src.accounts.write_log", lambda *a, **k: None)
+    acct = DummyAccount(
+        name="eval_buy", balance=10_000.0, strategy="", holdings={},
+        transactions=[], portfolio_value_time_series=[],
+    )
+    with pytest.raises(ValueError, match="Unrecognized symbol"):
+        acct.buy_shares("INVALID", 1, "test")
+
+def test_sell_shares_insufficient_holdings(monkeypatch):
+    monkeypatch.setattr("src.accounts.get_share_price", lambda s: 100.0)
+    monkeypatch.setattr("src.accounts.write_log", lambda *a, **k: None)
+    acct = DummyAccount(
+        name="eval_sell", balance=0, strategy="", holdings={"AAPL": 5},
+        transactions=[], portfolio_value_time_series=[],
+    )
+    with pytest.raises(ValueError, match="Not enough shares"):
+        acct.sell_shares("AAPL", 10, "test")
+
+def test_buy_then_sell_balance_and_holdings(monkeypatch):
+    monkeypatch.setattr("src.accounts.get_share_price", lambda s: 100.0)
+    monkeypatch.setattr("src.accounts.write_log", lambda *a, **k: None)
+    acct = DummyAccount(
+        name="eval_flow", balance=5_000.0, strategy="", holdings={},
+        transactions=[], portfolio_value_time_series=[],
+    )
+    acct.buy_shares("AAPL", 10, "eval buy")
+    assert acct.holdings.get("AAPL") == 10
+    acct.sell_shares("AAPL", 3, "eval sell")
+    assert acct.holdings.get("AAPL") == 7
+    assert len(acct.transactions) == 2
+```
+
+**Where:** Same file as existing tests; reuse `DummyAccount` and `monkeypatch` so no real DB or market is used.
+
+---
+
+### 3.2 `tests/test_mcp_accounts.py` (new) — MCP tool and resource evals
+
+**Entry points in src:** `accounts_client.py` exposes `list_accounts_tools()`, `call_accounts_tool(tool_name, tool_args)`, `read_accounts_resource(name)`, `read_strategy_resource(name)`. The MCP server is started via `StdioServerParameters(command="uv", args=["run", "accounts_server.py"], env=None)` and uses `database.DB = "accounts.db"` (database.py line 8).
+
+**Use a dedicated test account and optional test DB:**
+
+- Create a test account (e.g. `eval_test`) in the DB before MCP tests, or set `env` in `StdioServerParameters` to point the server to a test DB (would require making `database.DB` overridable via env, e.g. `DB = os.getenv("ACCOUNTS_DB", "accounts.db")`).
+- Run from repo root with `cd src` so `uv run accounts_server.py` finds the module; or run pytest from project root with `PYTHONPATH=src` so `accounts_client` and `database` use the same `src` layout.
+
+**Example: tool discovery (deterministic)**
+
+```python
+# tests/test_mcp_accounts.py
+import pytest
+import os
+# Ensure we run from project root and use test DB if set
+# export ACCOUNTS_DB=test_accounts.db for isolation
+
+@pytest.mark.asyncio
+async def test_accounts_mcp_tools_list():
+    from src.accounts_client import list_accounts_tools
+    tools = await list_accounts_tools()
+    names = [t.name for t in tools]
+    assert "get_balance" in names
+    assert "get_holdings" in names
+    assert "buy_shares" in names
+    assert "sell_shares" in names
+    assert "change_strategy" in names
+```
+
+**Example: tool contract — get_balance returns a number**
+
+```python
+@pytest.mark.asyncio
+async def test_get_balance_returns_number():
+    from src.accounts_client import call_accounts_tool
+    # Assumes an account "eval_test" exists with known state (e.g. created in conftest)
+    result = await call_accounts_tool("get_balance", {"name": "eval_test"})
+    content = result.content
+    # MCP tool result shape: typically list of ContentPart with text
+    text = content[0].text if hasattr(content[0], "text") else str(content)
+    balance = float(text)
+    assert balance >= 0
+```
+
+**Example: buy_shares rejects insufficient funds**
+
+```python
+@pytest.mark.asyncio
+async def test_buy_shares_rejects_insufficient_funds():
+    from src.accounts_client import call_accounts_tool
+    # Use an account with zero balance (seeded in conftest or fixture)
+    result = await call_accounts_tool("buy_shares", {
+        "name": "eval_test",
+        "symbol": "AAPL",
+        "quantity": 1000,
+        "rationale": "eval test",
+    })
+    text = result.content[0].text if result.content else str(result)
+    assert "insufficient" in text.lower() or "error" in text.lower()
+```
+
+**Example: resources return valid JSON / text**
+
+```python
+@pytest.mark.asyncio
+async def test_read_accounts_resource_returns_json():
+    from src.accounts_client import read_accounts_resource
+    import json
+    raw = await read_accounts_resource("eval_test")
+    data = json.loads(raw)
+    assert "name" in data
+    assert "balance" in data
+    assert "holdings" in data
+
+@pytest.mark.asyncio
+async def test_read_strategy_resource_returns_string():
+    from src.accounts_client import read_strategy_resource
+    strategy = await read_strategy_resource("eval_test")
+    assert isinstance(strategy, str)
+```
+
+**Where:** New file `tests/test_mcp_accounts.py`; optionally `tests/conftest.py` to create a test account and/or set `ACCOUNTS_DB` for the process (note: accounts_server subprocess may need the same env to use the test DB).
+
+---
+
+### 3.3 `tests/test_agent_evals.py` (new) — agent behavior evals
+
+**Entry points in src:** `traders.py`: `Trader.run_agent(trader_mcp_servers, researcher_mcp_servers)` builds the message with `trade_message(self.name, strategy, account)` or `rebalance_message(...)` (lines 154–157) and calls `Runner.run(self.agent, message, max_turns=MAX_TURNS)` (line 160). The agent is built in `create_agent()` (lines 124–135) with `trader_instructions(self.name)` from `templates.trader_instructions`.
+
+**Challenge:** `Runner.run()` is from the external `agents` SDK; we don’t control its return value. Two options:
+
+1. **Trace/log inspection:** The app registers `LogTracer()` in `trading_floor.py`, which writes to the DB via `database.write_log`. Run one trader cycle with a test account and fixed strategy, then assert on the last N log entries (e.g. that at least one log line contains a tool name like `buy_shares` or `get_holdings`). Requires a test DB and seeding a test account.
+2. **Wrap or mock Runner.run:** In the test, patch `Runner.run` to record the `message` and `agent` and return a fixed response; then assert on the message (e.g. contains the injected account state). For tool-call assertions, if the SDK exposes a way to capture tool calls (e.g. via a callback or trace), use that in the test.
+
+**Example: deterministic message construction (no LLM)**
+
+```python
+# tests/test_agent_evals.py
+import pytest
+from unittest.mock import AsyncMock, patch
+
+def test_trade_message_contains_account_name():
+    from src.templates import trade_message
+    account_json = '{"name":"EvalTrader","balance":10000,"holdings":{}}'
+    msg = trade_message("EvalTrader", "Buy low.", account_json)
+    assert "EvalTrader" in msg
+    assert "Your account name is EvalTrader" in msg
+    assert "10000" in msg or "account" in msg
+
+def test_rebalance_message_contains_strategy():
+    from src.templates import rebalance_message
+    account_json = '{"name":"Eval","balance":5000,"holdings":{"AAPL":10}}'
+    msg = rebalance_message("Eval", "Diversify.", account_json)
+    assert "rebalance" in msg.lower() or "portfolio" in msg.lower()
+    assert "Eval" in msg
+```
+
+**Example: agent run with mocked MCP and captured tool calls (if SDK allows)**
+
+If the Runner or Agent API lets you pass a callback or retrieve tool calls after `Runner.run`, use it like this (pseudo-code; adapt to actual SDK):
+
+```python
+@pytest.mark.asyncio
+async def test_trader_run_calls_account_tools(monkeypatch):
+    # 1) Mock account and strategy so no real MCP needed
+    fixed_account = '{"name":"eval","balance":10000,"holdings":{},"transactions":[]}'
+    fixed_strategy = "Preserve capital. Do not take large risks."
+    from src.traders import Trader
+    from src.templates import trade_message
+
+    async def mock_read_account(_): return fixed_account
+    async def mock_read_strategy(_): return fixed_strategy
+    monkeypatch.setattr("src.traders.read_accounts_resource", mock_read_account)
+    monkeypatch.setattr("src.traders.read_strategy_resource", mock_read_strategy)
+
+    # 2) Optional: mock Runner.run to capture message and fake tool calls
+    tool_calls_captured = []
+    async def capture_run(agent, message, max_turns=None):
+        tool_calls_captured.append(("message", message))
+        # Simulate one turn and return
+        return None
+    monkeypatch.setattr("src.traders.Runner.run", capture_run)
+
+    # 3) Run would need mocked MCP servers (empty list or minimal) so create_agent doesn’t fail
+    # Then run_agent; then assert on tool_calls_captured or on logs
+```
+
+**Example: assert on logs after a real short run (integration)**
+
+```python
+@pytest.mark.asyncio
+async def test_trader_run_writes_logs():
+    import os
+    os.environ["ACCOUNTS_DB"] = "test_accounts.db"  # if supported
+    # Seed eval_test account, then create Trader("EvalTest"), run one cycle
+    # with mocked researcher MCP to avoid network; then read_log("evaltest", last_n=20)
+    # and assert any("get_balance" in str(log) or "get_holdings" in str(log) for log in logs)
+```
+
+**Where:** New file `tests/test_agent_evals.py`; prompt/message evals are fully deterministic; agent tool-use evals depend on trace/log or SDK support for capturing tool calls.
+
+---
+
+### 3.4 `src/templates.py` — prompt surface for evals
+
+**Functions to target:** `trader_instructions(name)` (line 36), `trade_message(name, strategy, account)` (49), `rebalance_message(name, strategy, account)` (69), `researcher_instructions()` (12).
+
+**Eval ideas:**
+
+- **Deterministic:** For a fixed `name`, assert `trader_instructions(name)` contains `name` and does not contain placeholder leakage (e.g. `{api_key}`).
+- **Deterministic:** For fixed inputs, assert `trade_message` and `rebalance_message` include the given strategy snippet and account name.
+- **Regression:** Store a golden snippet of instructions (e.g. “use your account name”) and assert it still appears after template edits.
+
+```python
+# tests/test_templates.py (new or inside test_agent_evals.py)
+def test_trader_instructions_includes_account_name():
+    from src.templates import trader_instructions
+    t = trader_instructions("Warren")
+    assert "Warren" in t
+    assert "account" in t.lower()
+```
+
+---
+
+### 3.5 `src/market.py` and portfolio value
+
+**Entry points:** `get_share_price(symbol)` (line 69), used by `Account.calculate_portfolio_value()` and inside `buy_shares`/`sell_shares`.
+
+**Eval:** In `tests/test_accounts.py` (or `tests/test_market.py`), patch `get_share_price` to return known prices and assert `calculate_portfolio_value()` and PnL match expectations after a sequence of buys/sells. Already partially covered by the “buy then sell” style test; you can add an explicit portfolio-value assertion.
+
+```python
+def test_portfolio_value_after_trades(monkeypatch):
+    monkeypatch.setattr("src.accounts.get_share_price", lambda s: 100.0)
+    monkeypatch.setattr("src.accounts.write_log", lambda *a, **k: None)
+    acct = DummyAccount(
+        name="pv", balance=10_000.0, strategy="", holdings={},
+        transactions=[], portfolio_value_time_series=[],
+    )
+    acct.buy_shares("AAPL", 20, "eval")
+    pv = acct.calculate_portfolio_value()
+    # balance after buy: 10000 - 20*100*1.002; holdings 20*100
+    assert pv > 0
+    assert acct.holdings.get("AAPL") == 20
+```
+
+---
+
+### 3.6 Summary table (where to add evals)
+
+| Eval target              | File / location                      | How (deterministic vs LLM) |
+|--------------------------|--------------------------------------|----------------------------|
+| `Account.buy_shares`     | `tests/test_accounts.py`             | DummyAccount + monkeypatch `get_share_price`, `write_log`; assert ValueError or state |
+| `Account.sell_shares`    | `tests/test_accounts.py`            | Same pattern; assert insufficient holdings rejected |
+| `Account.report` / PnL   | `tests/test_accounts.py`            | Already present; extend with portfolio_value after trades |
+| MCP tool list            | `tests/test_mcp_accounts.py`        | `list_accounts_tools()` from `accounts_client`; assert tool names |
+| MCP tool contract        | `tests/test_mcp_accounts.py`        | `call_accounts_tool(name, args)`; assert return shape and semantics |
+| MCP resources            | `tests/test_mcp_accounts.py`        | `read_accounts_resource`, `read_strategy_resource`; assert JSON/string |
+| Message construction     | `tests/test_agent_evals.py` or `test_templates.py` | `trade_message`, `rebalance_message`, `trader_instructions` with fixed inputs |
+| Agent tool use / scenario| `tests/test_agent_evals.py`         | Run Trader with mocked MCP + account/strategy; assert on logs or captured tool calls (if SDK supports) |
+| Templates                | `tests/test_templates.py` or above   | Assert instructions contain required phrases and no secret placeholders |
+
+---
+
+## 4. Running evals
 
 - **CI**: run deterministic tests (unit + MCP smoke + tool contracts) on every commit; skip or gate expensive agent evals (e.g. only on main or nightly).
 - **Local**: `uv run pytest tests/ -v`; for agent evals, set env (e.g. `OPENAI_API_KEY`) and optionally `--run-llm-evals` or a marker.
@@ -120,7 +405,7 @@ async def test_buy_shares_rejects_insufficient_funds():
 
 ---
 
-## 4. Summary
+## 5. Summary
 
 | Eval type              | Deterministic? | Where              | Purpose                          |
 |------------------------|----------------|--------------------|----------------------------------|
