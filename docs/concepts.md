@@ -102,14 +102,14 @@ We focus on **local** and **local → web**; both are started as child processes
 
 ---
 
-## 3. How to *Use* an MCP Server [Important]
+## 3. How to Use an MCP Server [Important]
 
-**High-level steps:**
+### High-level steps:
 
-1. **Create or run an MCP server** — Either build your own (e.g. with FastMCP in Python) or run an existing one (e.g. via `npx` or `uv run`). The server exposes tools (and optionally resources, prompts). (e.g. `server.list_tools()`) to see names and schemas.
-2. **Create an MCP client** — Get a connection to that server. In code, something like `async with MCPServerStdio(params=...) as mcp_server` starts the server process and gives you a client handle (`mcp_server`) to talk to it.
-3. **Create an agent and attach the client** — Build your agent (the LLM actor) and pass the MCP client so it can call the server's tools: `Agent(..., mcp_servers=[mcp_server])`.
-4. **Run the agent with a request** — Execute the agent with a user message; when the model decides to use a tool, the framework uses the MCP client to call the server and returns the result.
+**Step-1**: Create or run an MCP server — Either build your own (e.g. with FastMCP in Python) or run an existing one (e.g. via `npx` or `uv run`). The server exposes tools (and optionally resources, prompts). (e.g. `server.list_tools()`) to see names and schemas.
+**Step-2:** Create an MCP client — Get a connection to that server. In code, something like `async with MCPServerStdio(params=...) as mcp_server` starts the server process and gives you a client handle (`mcp_server`) to talk to it.
+**Step-3:** Create an agent and attach the client — Build your agent (the LLM actor) and pass the MCP client so it can call the server's tools: `Agent(..., mcp_servers=[mcp_server])`.
+**Step-4:** Run the agent with a request — Execute the agent with a user message; when the model decides to use a tool, the framework uses the MCP client to call the server and returns the result.
 
 Same pattern: start server → get client → create agent with client → run agent.
 
@@ -173,6 +173,8 @@ request = (
 ```
 
 **Run:**
+
+Step-2, 3, 4: Create client, and pass it to Agent. Run agent with those MCP client ( that exposes MCP tools). Now Agent will decide how to use those tools based on the prompts (instructions + request)
 
 We're not creating the agent "inside" MCP. We're creating an agent and giving it an MCP client so it can call tools on an MCP server.
 
