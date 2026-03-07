@@ -426,80 +426,67 @@ So again: **instructions + request drive tool use.**
 The diagram below is the same **integrated view** as in [LLD §8](https://github.com/aditya-caltechie/ai-mcp-autonomous-traders/blob/main/docs/LLD.md). It summarizes which modules depend on MCP servers, DB, and external APIs.
 
 ```mermaid
-flowchart LR
-    subgraph Entrypoints["Entrypoints"]
-        App["app.py\n(UI)"]
-        TF["trading_floor.py\n(orchestrator)"]
-        Reset["reset.py\n(initializer)"]
+flowchart TB
+    subgraph Entrypoints
+        App[app.py UI]
+        TF[trading_floor.py orchestrator]
+        Reset[reset.py initializer]
     end
 
-    subgraph Agents["Agents & Tools"]
-        TradersMod["traders.py\nTrader agent"]
-        Templates["templates.py\nprompts/messages"]
-        Tracers["tracers.py\nLogTracer"]
+    subgraph Agents
+        TradersMod[traders.py Trader agent]
+        Templates[templates.py prompts]
+        Tracers[tracers.py LogTracer]
     end
 
-    subgraph MCPClients["MCP Clients & Params"]
-        MCPParams["mcp_params.py"]
-        AccClient["accounts_client.py"]
+    subgraph MCPClients
+        MCPParams[mcp_params.py]
+        AccClient[accounts_client.py]
     end
 
-    subgraph MCPServers["MCP Servers"]
-        AccSrv["accounts_server.py"]
-        MktSrv["market_server.py or mcp_polygon"]
-        PushSrv["push_server.py"]
-        ExtMCP["mcp-server-fetch,\nBrave, mcp-memory-libsql"]
+    subgraph MCPServers
+        AccSrv[accounts_server.py]
+        MktSrv[market_server or mcp_polygon]
+        PushSrv[push_server.py]
+        ExtMCP[fetch Brave memory]
     end
 
-    subgraph Domain["Domain & Infra"]
-        Accounts["accounts.py"]
-        Market["market.py"]
-        DB["database.py\nSQLite: accounts, logs, market"]
-        Util["util.py\nCSS/JS/Color"]
+    subgraph Domain
+        Accounts[accounts.py]
+        Market[market.py]
+        DB[database.py SQLite]
+        Util[util.py]
     end
 
-    subgraph External["External Services"]
-        Polygon["Polygon REST API"]
-        Pushover["Pushover API"]
-        LLMs["LLM APIs via AsyncOpenAI\n(OpenRouter, DeepSeek, Grok, Gemini)"]
-        BraveAPI["Brave Search API"]
+    subgraph External
+        Polygon[Polygon REST API]
+        Pushover[Pushover API]
+        LLMs[LLM APIs]
+        BraveAPI[Brave Search API]
     end
 
-    %% Entrypoints
     App --> Util
     App --> Accounts
     App --> DB
-
     TF --> TradersMod
     Reset --> Accounts
     Reset --> DB
-
-    %% Agents
     TradersMod --> Templates
     TradersMod --> Tracers
     TradersMod --> MCPParams
     TradersMod --> AccClient
     TradersMod --> LLMs
-
-    %% MCP wiring
     MCPParams --> AccSrv
     MCPParams --> MktSrv
     MCPParams --> PushSrv
     MCPParams --> ExtMCP
-
     AccClient --> AccSrv
-
-    %% Servers to domain & externals
     AccSrv --> Accounts
     Accounts --> DB
-
     MktSrv --> Market
     Market --> DB
     Market --> Polygon
-
     PushSrv --> Pushover
-
-    %% External MCP to Brave & memory
     ExtMCP --> BraveAPI
     ExtMCP --> DB
 ```
