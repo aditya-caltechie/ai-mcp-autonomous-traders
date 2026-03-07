@@ -21,21 +21,21 @@ MCP has three main pieces:
 Most often, MCP servers run on your machine: you download or build them and run them locally. Clients on the same host connect to them. Optionally, a client can also talk to a **remote** MCP server over the network; that server may in turn call external APIs.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
+┌────────────────────────────────────────────────────────────────────-─┐
 │ Your computer (Host)                                                 │
 │                                                                      │
 │   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐                │
 │   │ MCP Client  │   │ MCP Client  │   │ MCP Client  │  ← Agent runs  │
 │   └──────┬──────┘   └──────┬──────┘   └──────┬──────┘    here        │
-│          │ stdio / SSE     │                 │                        │
+│          │ stdio / SSE     │                 │                       │
 │   ┌──────▼──────┐   ┌──────▼──────┐                                  │
-│   │ MCP Server  │   │ MCP Server  │   (local: tools, resources)       │
+│   │ MCP Server  │   │ MCP Server  │   (local: tools, resources)      │
 │   └─────────────┘   └─────────────┘                                  │
-└─────────────────────────────────────────────────────────────────────┘
+└───────────────────────────────────────────────────────────────────-──┘
           │ SSE (when using a remote server)
           ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Remote server                                                        │
+│ Remote server                                                       │
 │   ┌─────────────┐          ┌─────────────┐                          │
 │   │ MCP Server  │ ────────►│ External API│  (e.g. Brave, Polygon)   │
 │   └─────────────┘          └─────────────┘                          │
