@@ -202,7 +202,8 @@ if __name__ == "__main__":
 ```
 
 where `get_share_price` was called from internal file market.py which make a REST API call to polygon for getting the market prices eventually. Below is just snippet:
-```
+
+```python
 def get_all_share_prices_polygon_eod() -> dict[str, float]:
 
     client = RESTClient(polygon_api_key)
@@ -214,7 +215,7 @@ def get_all_share_prices_polygon_eod() -> dict[str, float]:
     # Get the daily aggregated prices for all stocks using the Polygon API
     results = client.get_grouped_daily_aggs(last_close, adjusted=True, include_otc=False)
     return {result.ticker: result.close for result in results}
-    
+
 ```
 
 Steps in short:
