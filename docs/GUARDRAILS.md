@@ -140,38 +140,268 @@ Implementing even a subset (e.g. order size caps, allowlist, kill switch, daily 
 
 ---
 
-## 7. Other production-readiness considerations
+## 7. Specific implementation examples (where and how in `src/`)
+
+The following are concrete insertion points and code patterns using the current codebase.
+
+### 7.1 `src/accounts.py` — order and risk guardrails
+
+**Location:** `buy_shares` (lines 97–119) and `sell_shares` (lines 121–145).
+
+**Current checks:** `total_cost > self.balance`, `price == 0`, `holdings.get(symbol, 0) < quantity`.
+
+**Add at the start of `buy_shares` (after getting `price`, before balance check):**
+
+```python
+# Example: max quantity per order (e.g. from os.getenv("MAX_ORDER_QUANTITY", "1000"))
+MAX_ORDER_QUANTITY = int(os.getenv("MAX_ORDER_QUANTITY", "5000"))
+if quantity <= 0 or quantity > MAX_ORDER_QUANTITY:
+    raise ValueError(f"Quantity must be between 1 and {MAX_ORDER_QUANTITY}.")
+
+# Example: max notional per order (e.g. 20% of portfolio or fixed cap)
+portfolio_value = self.calculate_portfolio_value()
+max_notional = max(portfolio_value * 0.20, 10_000)  # or from env
+if buy_price * quantity > max_notional:
+    raise ValueError(f"Order notional exceeds limit (max {max_notional:.0f}).")
+```
+
+**Add before updating holdings in `buy_shares` (position concentration):**
+
+```python
+# Example: no single position > 25% of portfolio
+new_position_value = (self.holdings.get(symbol, 0) + quantity) * buy_price
+if new_position_value > portfolio_value * 0.25:
+    raise ValueError(f"Buy would exceed 25% position limit for {symbol}.")
+```
+
+**Add in both `buy_shares` and `sell_shares` (rationale and daily / kill switch):**
+
+```python
+# Rationale required and bounded
+if not rationale or not rationale.strip():
+    raise ValueError("Rationale is required for every trade.")
+if len(rationale) > 500:  # optional cap for logs
+    rationale = rationale[:500] + "..."
+
+# Kill switch (env TRADING_PAUSED=1)
+if os.getenv("TRADING_PAUSED", "").strip().lower() in ("1", "true", "yes"):
+    raise ValueError("Trading is temporarily paused by operator.")
+
+# Daily trade count (e.g. max 10 orders per day per account)
+from datetime import datetime
+today = datetime.now().strftime("%Y-%m-%d")
+today_trades = sum(1 for t in self.transactions if t.timestamp.startswith(today))
+if today_trades >= int(os.getenv("MAX_TRADES_PER_DAY", "20")):
+    raise ValueError("Daily trade limit reached. Try again tomorrow.")
+```
+
+**`change_strategy` (line 188):** add length limit or require non-empty; optionally disable when `TRADING_PAUSED`:
+
+```python
+def change_strategy(self, strategy: str) -> str:
+    if not strategy or not strategy.strip():
+        raise ValueError("Strategy cannot be empty.")
+    if os.getenv("TRADING_PAUSED", "").strip().lower() in ("1", "true", "yes"):
+        raise ValueError("Trading is paused; strategy changes disabled.")
+    # ... rest unchanged
+```
+
+---
+
+### 7.2 `src/accounts_server.py` — input validation before calling `Account`
+
+**Location:** MCP tool handlers `buy_shares`, `sell_shares` (lines 24–46). The agent supplies `name`, `symbol`, `quantity`, `rationale`; the server does not know which trader is calling (all traders share the same MCP process), so identity guardrails would require passing caller context (see below).
+
+**Add at the top of each tool (e.g. `buy_shares`):**
+
+```python
+# Normalize symbol: uppercase, strip
+symbol = str(symbol).strip().upper()
+if len(symbol) > 10 or not symbol.isalpha():
+    return "Error: Invalid symbol format."
+
+# Quantity: positive integer
+if not isinstance(quantity, int) or quantity <= 0:
+    return "Error: Quantity must be a positive integer."
+
+# Optional: allowlist (e.g. from env ALLOWED_TICKERS=AAPL,MSFT,GOOGL or a file)
+allowed = os.getenv("ALLOWED_TICKERS", "").strip().split(",")
+if allowed and [a for a in allowed if a]:
+    if symbol not in [a.strip().upper() for a in allowed if a]:
+        return f"Error: {symbol} is not in the allowed ticker list."
+# Blocklist
+blocked = os.getenv("BLOCKED_TICKERS", "").strip().upper().split(",")
+if symbol in [b.strip() for b in blocked if b]:
+    return f"Error: {symbol} is not permitted for trading."
+
+# Rationale
+if not rationale or not str(rationale).strip():
+    return "Error: A non-empty rationale is required."
+```
+
+Then call `Account.get(name).buy_shares(symbol, quantity, rationale)` as today. Same pattern can be applied in `sell_shares` and optionally in `change_strategy`.
+
+**Account identity (name):** The prompts in `templates.py` say “Your account name is {name}” and the message is built with `trade_message(self.name, ...)` in `traders.py` (line 154). The agent is *instructed* to use its own name, but the MCP server does not verify it. To enforce “only this trader can act on this account,” you would need one of:
+
+- Run one accounts MCP server *per trader* with an env var set to that trader’s name, and in the tool ignore the `name` argument and use the env var; or
+- Pass the caller identity in the MCP session/context (if the SDK supports it) and reject tool calls where `name != caller_identity`.
+
+The current architecture uses a single shared `accounts_server` process, so identity enforcement is not implemented; the doc can note this as a future improvement.
+
+---
+
+### 7.3 `src/guardrails.py` (new module) — shared checks
+
+Centralize config and reusable checks so both `accounts.py` and `accounts_server.py` can call them.
+
+**Example shape:**
+
+```python
+# src/guardrails.py
+import os
+from typing import Optional
+
+def get_max_order_quantity() -> int:
+    return int(os.getenv("MAX_ORDER_QUANTITY", "5000"))
+
+def get_allowed_tickers() -> list[str]:
+    raw = os.getenv("ALLOWED_TICKERS", "").strip()
+    if not raw:
+        return []  # empty = no allowlist
+    return [s.strip().upper() for s in raw.split(",") if s.strip()]
+
+def get_blocked_tickers() -> list[str]:
+    raw = os.getenv("BLOCKED_TICKERS", "").strip().upper()
+    return [s.strip() for s in raw.split(",") if s.strip()]
+
+def is_trading_paused() -> bool:
+    return os.getenv("TRADING_PAUSED", "").strip().lower() in ("1", "true", "yes")
+
+def check_symbol(symbol: str) -> Optional[str]:
+    """Returns None if OK, or an error message."""
+    s = str(symbol).strip().upper()
+    if len(s) > 10 or not s.isalpha():
+        return "Invalid symbol format."
+    allowed = get_allowed_tickers()
+    if allowed and s not in allowed:
+        return f"{s} is not in the allowed ticker list."
+    if s in get_blocked_tickers():
+        return f"{s} is not permitted for trading."
+    return None
+
+def check_quantity(quantity: int, side: str = "buy") -> Optional[str]:
+    if not isinstance(quantity, int) or quantity <= 0:
+        return "Quantity must be a positive integer."
+    if quantity > get_max_order_quantity():
+        return f"Quantity exceeds max order size ({get_max_order_quantity()})."
+    return None
+```
+
+Then in `accounts.py` and `accounts_server.py`: `from guardrails import check_symbol, check_quantity, is_trading_paused, ...` and call them before proceeding.
+
+---
+
+### 7.4 `src/templates.py` — prompt-level guardrails
+
+**Location:** `trader_instructions(name)` (lines 36–47) and `trade_message` / `rebalance_message` (49–85).
+
+Add explicit rules the model should follow (soft guardrails):
+
+```python
+def trader_instructions(name: str):
+    return f"""
+You are {name}, a trader on the stock market. Your account is under your name, {name}.
+...
+You must only use your own account name "{name}" when calling buy or sell tools; never use another trader's name.
+Never submit a single order for more than 5% of your portfolio value in notional terms.
+Always provide a short, genuine rationale for every buy or sell (at least one sentence).
+"""
+```
+
+And at the end of `trade_message` / `rebalance_message`:
+
+```text
+Remember: use account name "{name}" only; one order per symbol per run is recommended; keep rationale non-empty.
+```
+
+This does not replace server-side checks but reduces obviously wrong tool calls.
+
+---
+
+### 7.5 `src/trading_floor.py` — market hours and global pause
+
+**Location:** `run_every_n_minutes()` (lines 40–48). Market hours are already gated with `is_market_open()` and `RUN_EVEN_WHEN_MARKET_IS_CLOSED`.
+
+**Optional:** skip running traders when a global kill switch is set, so no agent runs at all:
+
+```python
+# At the start of the loop, before is_market_open()
+if os.getenv("TRADING_PAUSED", "").strip().lower() in ("1", "true", "yes"):
+    print("Trading is paused (TRADING_PAUSED). Skipping run.")
+    await asyncio.sleep(RUN_EVERY_N_MINUTES * 60)
+    continue
+```
+
+---
+
+### 7.6 `src/market.py` and `src/database.py` — stale data (optional)
+
+**Current behavior:** `get_share_price(symbol)` returns a float; for EOD it uses `get_market_for_prior_date(today)` with cached data in `database.read_market(date)`. There is no “last updated” timestamp exposed.
+
+**Optional guard:** In `accounts.py` inside `buy_shares`/`sell_shares`, if you later add a way to get “last price time” (e.g. from market_server or a small extension to `get_share_price`), reject orders when the price is older than e.g. 1 hour for paid/realtime plans. This would require a small API change in `market.py` (e.g. return a tuple or a small dataclass with price and timestamp).
+
+---
+
+### 7.7 Summary table (where to add what)
+
+| Guardrail           | File               | Where / how                                                                 |
+|---------------------|--------------------|-----------------------------------------------------------------------------|
+| Max order quantity  | `accounts.py`      | Start of `buy_shares` / `sell_shares`; raise if `quantity > MAX_ORDER_QUANTITY` |
+| Max notional/order  | `accounts.py`      | In `buy_shares` after `get_share_price`; compare `quantity * price` to limit    |
+| Position % cap      | `accounts.py`      | In `buy_shares` before updating `holdings`; compare new position value to portfolio % |
+| Rationale required  | `accounts.py`      | Start of `buy_shares`/`sell_shares`; reject if empty or only whitespace           |
+| Kill switch         | `accounts.py`      | Start of `buy_shares`/`sell_shares`/`change_strategy`; check `TRADING_PAUSED`     |
+| Daily trade limit   | `accounts.py`      | In `buy_shares`/`sell_shares`; count `self.transactions` for today, compare to env |
+| Ticker allow/block  | `accounts_server.py` or `guardrails.py` | Before `Account.get(...).buy_shares`; validate `symbol`                      |
+| Symbol/quantity norm| `accounts_server.py` | Start of `buy_shares`/`sell_shares` tools; normalize and validate, return error string |
+| Prompt rules        | `templates.py`     | In `trader_instructions` and `trade_message`/`rebalance_message`; add short rules  |
+| Global pause        | `trading_floor.py`  | Start of scheduler loop; skip run if `TRADING_PAUSED`                             |
+| Shared helpers      | `guardrails.py`    | New module; env-based config and `check_symbol`/`check_quantity`/`is_trading_paused` |
+
+---
+
+## 8. Other production-readiness considerations
 
 Beyond **guardrails** (this doc) and **evals** (see `docs/EVALS.md`), the following help make the system production-level:
 
-### 7.1 Observability and alerting
+### 8.1 Observability and alerting
 
 - **Tracing**: already in place (OpenAI traces + `LogTracer` to SQLite); see `docs/6_OBSERVABILITY.md`.
 - **Alerting**: no alerts today. Add alerts for: trader run failures, MCP server crashes, drawdown threshold, kill switch activated, or daily limit hit. Can be wired to Pushover (existing push server) or PagerDuty/Slack.
 - **Metrics**: optional counters/gauges (trades per run, tool call latency, LLM latency) for dashboards (e.g. Grafana) and SLOs.
 
-### 7.2 Secrets and configuration
+### 8.2 Secrets and configuration
 
 - **Secrets**: keep API keys and credentials in env or a secret manager; never in code or prompts. Rotate keys periodically.
 - **Config per environment**: separate config for dev/staging/prod (e.g. different DB paths, allowlists, or “read-only” in non-prod).
 
-### 7.3 Audit and compliance
+### 8.3 Audit and compliance
 
 - **Audit log**: persist an immutable log of all trading actions (who, when, symbol, quantity, rationale, outcome). Current `write_log` and transactions are a start; consider a dedicated audit table that is append-only.
 - **Replay**: ability to replay a past run (same account snapshot + message) for debugging or compliance review; requires storing inputs and optionally trace IDs.
 
-### 7.4 Reliability and recovery
+### 8.4 Reliability and recovery
 
 - **Idempotency**: for real broker integrations, use idempotency keys on orders to avoid double execution on retries.
 - **Graceful degradation**: if one MCP server (e.g. market) is down, the agent could still report and rebalance from cached data or skip trading and only log; document expected behavior.
 - **Disaster recovery**: backup `accounts.db` and config; document restore and reset procedures (see `reset.py`).
 
-### 7.5 Versioning and change management
+### 8.5 Versioning and change management
 
 - **Prompt and strategy versioning**: track which template/strategy version was used for each run (e.g. store version or hash in logs) so you can correlate behavior changes with prompt edits.
 - **Model and SDK versions**: pin or record OpenAI SDK and model names so evals and behavior are reproducible.
 
-### 7.6 Documentation and runbooks
+### 8.6 Documentation and runbooks
 
 - **Runbooks**: how to pause trading, clear a stuck run, restore from backup, and run evals (see `docs/EVALS.md`).
 - **README and AGENTS.md**: keep setup, env vars, and main commands up to date so new contributors and operators can run the system safely.
