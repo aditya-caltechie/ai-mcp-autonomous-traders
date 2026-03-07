@@ -100,101 +100,18 @@ An MCP server exposes one or more **tools** — callable functions with a name, 
 
 We focus on **local** and **local → web**; both are started as child processes (e.g. `npx`, `uv run`). In this repo, **accounts_server** is local-only (SQLite); **market_server** and **push_server** are local processes that call external APIs (Polygon, Pushover).
 
-### 2.1 Integrated view: modules and MCP dependencies
-
-The diagram below is the same **integrated view** as in [LLD §8](https://github.com/aditya-caltechie/ai-mcp-autonomous-traders/blob/main/docs/LLD.md). It summarizes which modules depend on MCP servers, DB, and external APIs.
-
-```mermaid
-flowchart LR
-    subgraph Entrypoints["Entrypoints"]
-        App["app.py\n(UI)"]
-        TF["trading_floor.py\n(orchestrator)"]
-        Reset["reset.py\n(initializer)"]
-    end
-
-    subgraph Agents["Agents & Tools"]
-        TradersMod["traders.py\nTrader agent"]
-        Templates["templates.py\nprompts/messages"]
-        Tracers["tracers.py\nLogTracer"]
-    end
-
-    subgraph MCPClients["MCP Clients & Params"]
-        MCPParams["mcp_params.py"]
-        AccClient["accounts_client.py"]
-    end
-
-    subgraph MCPServers["MCP Servers"]
-        AccSrv["accounts_server.py"]
-        MktSrv["market_server.py or mcp_polygon"]
-        PushSrv["push_server.py"]
-        ExtMCP["mcp-server-fetch,\nBrave, mcp-memory-libsql"]
-    end
-
-    subgraph Domain["Domain & Infra"]
-        Accounts["accounts.py"]
-        Market["market.py"]
-        DB["database.py\nSQLite: accounts, logs, market"]
-        Util["util.py\nCSS/JS/Color"]
-    end
-
-    subgraph External["External Services"]
-        Polygon["Polygon REST API"]
-        Pushover["Pushover API"]
-        LLMs["LLM APIs via AsyncOpenAI\n(OpenRouter, DeepSeek, Grok, Gemini)"]
-        BraveAPI["Brave Search API"]
-    end
-
-    %% Entrypoints
-    App --> Util
-    App --> Accounts
-    App --> DB
-
-    TF --> TradersMod
-    Reset --> Accounts
-    Reset --> DB
-
-    %% Agents
-    TradersMod --> Templates
-    TradersMod --> Tracers
-    TradersMod --> MCPParams
-    TradersMod --> AccClient
-    TradersMod --> LLMs
-
-    %% MCP wiring
-    MCPParams --> AccSrv
-    MCPParams --> MktSrv
-    MCPParams --> PushSrv
-    MCPParams --> ExtMCP
-
-    AccClient --> AccSrv
-
-    %% Servers to domain & externals
-    AccSrv --> Accounts
-    Accounts --> DB
-
-    MktSrv --> Market
-    Market --> DB
-    Market --> Polygon
-
-    PushSrv --> Pushover
-
-    %% External MCP to Brave & memory
-    ExtMCP --> BraveAPI
-    ExtMCP --> DB
-```
-
-For per-module call flow and sequence diagrams, see the full [Low-Level Design (LLD)](https://github.com/aditya-caltechie/ai-mcp-autonomous-traders/blob/main/docs/LLD.md).
-
 ---
 
-## 3. How to *Use* an MCP Server (Client Side)
+## 3. How to *Use* an MCP Server [Important]
 
-Same pattern for any MCP server:
+**High-level steps:**
 
-1. **Start the server** with the right `command`, `args`, and `env` (e.g. API keys).
-2. **List tools** (e.g. `server.list_tools()`) to see names and schemas.
-3. **Create an agent** with `instructions` and attach the server via `mcp_servers=[...]`.
-4. **Run the agent** with a `request`; the model uses instructions + request to decide which tools to call.
+1. **Create or run an MCP server** — Either build your own (e.g. with FastMCP in Python) or run an existing one (e.g. via `npx` or `uv run`). The server exposes tools (and optionally resources, prompts). (e.g. `server.list_tools()`) to see names and schemas.
+2. **Create an MCP client** — Get a connection to that server. In code, something like `async with MCPServerStdio(params=...) as mcp_server` starts the server process and gives you a client handle (`mcp_server`) to talk to it.
+3. **Create an agent and attach the client** — Build your agent (the LLM actor) and pass the MCP client so it can call the server's tools: `Agent(..., mcp_servers=[mcp_server])`.
+4. **Run the agent with a request** — Execute the agent with a user message; when the model decides to use a tool, the framework uses the MCP client to call the server and returns the result.
+
+Same pattern: start server → get client → create agent with client → run agent.
 
 Instructions and request are the main knobs for “how” the tools get used.
 
@@ -204,7 +121,9 @@ Instructions and request are the main knobs for “how” the tools get used.
 
 We **do not build** this server; we **run** the official Brave Search MCP and **use** its tools via instructions and request.
 
-### 4.1 How we run it
+### 4.1 How we run it - 
+
+Step-1: start MCP server with `uv` command
 
 - **Command:** run the npm package with `npx`; pass the API key in `env`.
 
@@ -254,6 +173,21 @@ request = (
 ```
 
 **Run:**
+
+We're not creating the agent "inside" MCP. We're creating an agent and giving it an MCP client so it can call tools on an MCP server.
+
+- **`async with MCPServerStdio(...) as mcp_server`**  
+  Starts the MCP server as a subprocess (e.g. Brave Search).  
+  `mcp_server` is the client to that server (the handle our process uses to talk to it).
+
+- **`Agent(..., mcp_servers=[mcp_server])`**  
+  Creates the agent (the LLM actor) in our process.  
+  We pass the MCP client so the agent framework can invoke tools on that server when the model chooses a tool.
+
+- **`Runner.run(agent, request)`**  
+  Runs the agent. When it calls a tool, the framework uses the MCP client to send the call to the MCP server subprocess and returns the result.
+
+So: agent = LLM in our process; MCP server = separate process that exposes tools; MCP client = connection we pass into the agent so it can use those tools. The agent uses MCP; it isn't "inside" the MCP server.
 
 ```python
 async with MCPServerStdio(params=params, client_session_timeout_seconds=30) as mcp_server:
@@ -482,8 +416,94 @@ Flow:
 So again: **instructions + request drive tool use.**
 
 ---
+## 7. Integrated view: modules and MCP dependencies
 
-## 7. Summary: Instructions and Request
+The diagram below is the same **integrated view** as in [LLD §8](https://github.com/aditya-caltechie/ai-mcp-autonomous-traders/blob/main/docs/LLD.md). It summarizes which modules depend on MCP servers, DB, and external APIs.
+
+```mermaid
+flowchart LR
+    subgraph Entrypoints["Entrypoints"]
+        App["app.py\n(UI)"]
+        TF["trading_floor.py\n(orchestrator)"]
+        Reset["reset.py\n(initializer)"]
+    end
+
+    subgraph Agents["Agents & Tools"]
+        TradersMod["traders.py\nTrader agent"]
+        Templates["templates.py\nprompts/messages"]
+        Tracers["tracers.py\nLogTracer"]
+    end
+
+    subgraph MCPClients["MCP Clients & Params"]
+        MCPParams["mcp_params.py"]
+        AccClient["accounts_client.py"]
+    end
+
+    subgraph MCPServers["MCP Servers"]
+        AccSrv["accounts_server.py"]
+        MktSrv["market_server.py or mcp_polygon"]
+        PushSrv["push_server.py"]
+        ExtMCP["mcp-server-fetch,\nBrave, mcp-memory-libsql"]
+    end
+
+    subgraph Domain["Domain & Infra"]
+        Accounts["accounts.py"]
+        Market["market.py"]
+        DB["database.py\nSQLite: accounts, logs, market"]
+        Util["util.py\nCSS/JS/Color"]
+    end
+
+    subgraph External["External Services"]
+        Polygon["Polygon REST API"]
+        Pushover["Pushover API"]
+        LLMs["LLM APIs via AsyncOpenAI\n(OpenRouter, DeepSeek, Grok, Gemini)"]
+        BraveAPI["Brave Search API"]
+    end
+
+    %% Entrypoints
+    App --> Util
+    App --> Accounts
+    App --> DB
+
+    TF --> TradersMod
+    Reset --> Accounts
+    Reset --> DB
+
+    %% Agents
+    TradersMod --> Templates
+    TradersMod --> Tracers
+    TradersMod --> MCPParams
+    TradersMod --> AccClient
+    TradersMod --> LLMs
+
+    %% MCP wiring
+    MCPParams --> AccSrv
+    MCPParams --> MktSrv
+    MCPParams --> PushSrv
+    MCPParams --> ExtMCP
+
+    AccClient --> AccSrv
+
+    %% Servers to domain & externals
+    AccSrv --> Accounts
+    Accounts --> DB
+
+    MktSrv --> Market
+    Market --> DB
+    Market --> Polygon
+
+    PushSrv --> Pushover
+
+    %% External MCP to Brave & memory
+    ExtMCP --> BraveAPI
+    ExtMCP --> DB
+```
+
+For per-module call flow and sequence diagrams, see the full [Low-Level Design (LLD)](https://github.com/aditya-caltechie/ai-mcp-autonomous-traders/blob/main/docs/LLD.md).
+
+---
+
+## 8. Summary: Instructions and Request
 
 - **Instructions** = agent’s role and how it may use tools (e.g. “search the web and summarize”, “answer stock market questions”, “notify with push when significant”).
 - **Request** = user message; the more specific it is (e.g. “latest Tesla news”, “Apple share price”), the more likely the right tool is used.
