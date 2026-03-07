@@ -107,8 +107,11 @@ We focus on **local** and **local → web**; both are started as child processes
 ### High-level steps:
 
 **Step-1**: Create or run an MCP server — Either build your own (e.g. with FastMCP in Python) or run an existing one (e.g. via `npx` or `uv run`). The server exposes tools (and optionally resources, prompts). (e.g. `server.list_tools()`) to see names and schemas.
+
 **Step-2:** Create an MCP client — Get a connection to that server. In code, something like `async with MCPServerStdio(params=...) as mcp_server` starts the server process and gives you a client handle (`mcp_server`) to talk to it.
+
 **Step-3:** Create an agent and attach the client — Build your agent (the LLM actor) and pass the MCP client so it can call the server's tools: `Agent(..., mcp_servers=[mcp_server])`.
+
 **Step-4:** Run the agent with a request — Execute the agent with a user message; when the model decides to use a tool, the framework uses the MCP client to call the server and returns the result.
 
 Same pattern: start server → get client → create agent with client → run agent.
