@@ -164,7 +164,7 @@ The LLM agent **decides at runtime** which MCP tools to call based on prompts (`
 
 ### 4.1 Sequence from Orchestrator to DB and MCP
 
-> **This entire workflow is driven by the prompts we provide.** The strategy text in those prompts is seeded by `reset.py` (e.g. `waren_strategy`, `george_strategy`) and stored in the DB; each run loads it via `read_strategy_resource` and injects it into `trade_message` or `rebalance_message` in `templates.py`. The agent’s instructions (`trader_instructions`, `researcher_instructions`) and the initial message together determine what the agent does—research, trade, rebalance, push.
+**This entire workflow is driven by the prompts we provide.** The strategy text in those prompts is seeded by `reset.py` (e.g. `waren_strategy`, `george_strategy`) and stored in the DB; each run loads it via `read_strategy_resource` and injects it into `trade_message` or `rebalance_message` in `templates.py`. The agent’s instructions (`trader_instructions`, `researcher_instructions`) and the initial message together determine what the agent does—research, trade, rebalance, push.
 
 The following sequence diagram shows a single trader run from `trading_floor.py` down to MCP and DB.
 
