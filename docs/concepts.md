@@ -4,13 +4,13 @@ This document explains the basics of **building** and **using** MCP (Model Conte
 
 ---
 
-## Introduction
+## 0. Introduction
 
 **MCP is not a framework for building agents.** It is a **protocol** — a standard way for an agent (or any client) to talk to services that expose capabilities. Think of it as a simple, consistent way to integrate **tools**, **resources**, and **prompts** into your agent stack. You still build agents with an agent framework (e.g. OpenAI Agents SDK); MCP defines how those agents discover and call tools, read resources, and use prompt templates.
 
 ---
 
-## How MCP Works: Three Components
+### How MCP Works: Three Components
 
 MCP has three main pieces:
 
@@ -42,11 +42,11 @@ Most often, MCP servers run on your machine: you download or build them and run 
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-*A visual version of this layout appears in the course material (“MCP Servers most often run on your box”).*
+*(“MCP Servers most often run on your box”).*
 
 ---
 
-## Transport: stdio vs SSE
+### Transport: stdio vs SSE
 
 The client and server need a way to exchange messages. MCP defines two transports:
 
@@ -60,18 +60,6 @@ In both cases, the same protocol runs on top; only the wire format and process m
 ## MCP Server = Multiple Tools (and More) for Agents
 
 An MCP server exposes one or more **tools** — callable functions with a name, description, and input schema. When you build an agent, you attach one or more MCP servers to it. The agent sees the union of all tools from those servers and, based on **instructions** and the **user request**, decides when to call which tool. So: the server does not “run” the agent; it **provides** the tools the agent uses. Resources and prompts (if the server supports them) extend this same idea: the agent can read resources or fill in prompt templates as part of its workflow.
-
----
-
-## MCP Marketplace: Remote and Discoverable Servers
-
-Beyond running open-source MCP servers locally, you can use **remote** or **hosted** MCP servers. These are often listed or offered in MCP-focused directories and marketplaces, so you can discover and connect to them without hosting the server yourself. Examples of such places:
-
-- **[mcp.so](https://mcp.so)** — MCP directory and resources.
-- **[Glamira.ai MCP](https://glamara.ai/mcp)** — MCP-related offerings and integrations.
-- **[Smithery](https://smithery.ai/)** — Platform for AI tools and MCP servers.
-
-Connecting to a remote server usually means using the **SSE** transport and the URL (and any auth) provided by the marketplace or provider. Your MCP client (e.g. your agent runtime) then talks to that URL instead of starting a local subprocess.
 
 ---
 
@@ -291,3 +279,16 @@ So again: **instructions + request drive tool use.**
 | Use | Instructions: “search web and summarize”; Request: “latest Tesla news” | Instructions: “answer stock market questions”; Request: “Apple share price?” |
 
 For more on how this project wires MCP into traders and researchers, see **`docs/LLD.md`** and **`AGENTS.md`**.
+
+---
+## MCP Marketplace: Remote and Discoverable Servers
+
+Beyond running open-source MCP servers locally, you can use **remote** or **hosted** MCP servers. These are often listed or offered in MCP-focused directories and marketplaces, so you can discover and connect to them without hosting the server yourself. Examples of such places:
+
+- **[mcp.so](https://mcp.so)** — MCP directory and resources.
+- **[Glamira.ai MCP](https://glamara.ai/mcp)** — MCP-related offerings and integrations.
+- **[Smithery](https://smithery.ai/)** — Platform for AI tools and MCP servers.
+
+Connecting to a remote server usually means using the **SSE** transport and the URL (and any auth) provided by the marketplace or provider. Your MCP client (e.g. your agent runtime) then talks to that URL instead of starting a local subprocess.
+
+---
