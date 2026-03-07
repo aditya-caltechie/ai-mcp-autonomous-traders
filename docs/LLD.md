@@ -20,7 +20,7 @@ Each trader is built from **two agents**:
 
 The **Research Agent is wrapped as a tool** and the **Trader Agent uses it as a tool**. Flow: build Researcher agent (with researcher MCP servers) → expose as tool via `researcher.as_tool(...)` → build Trader agent with `tools=[tool]` and `mcp_servers=trader_mcp_servers`. See `traders.py` (e.g. `get_researcher`, `get_researcher_tool`, `create_agent`) and `mcp_params.py`.
 
-**This entire workflow is driven by the prompts we provide.** The strategy text in those prompts is seeded by `reset.py` (e.g. `waren_strategy`, `george_strategy`) and stored in the DB; each run loads it via `read_strategy_resource` and injects it into `trade_message` or `rebalance_message` in `templates.py`. The agent’s instructions (`trader_instructions`, `researcher_instructions`) and the initial message together determine what the agent does—research, trade, rebalance, push.
+**This entire workflow is driven/automated by the prompts we provide.** The strategy text in those prompts is seeded by `reset.py` (e.g. `waren_strategy`, `george_strategy`) and stored in the DB; each run loads it via `read_strategy_resource` and injects it into `trade_message` or `rebalance_message` in `templates.py`. The agent’s instructions (`trader_instructions`, `researcher_instructions`) and the initial message together determine what the agent does—research, trade, rebalance, push. And accordingly which tools to call to accomplish its goal as per instrcutions.
 
 
 ---
