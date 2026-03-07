@@ -113,8 +113,24 @@ The **Research Agent is wrapped as a tool** and the **Trader Agent uses it as a 
 - `src/accounts_server.py` / `src/market_server.py` / `src/push_server.py` – MCP servers.
 - `src/mcp_params.py` – how MCP servers are launched for traders and researchers.
 - `src/reset.py` – reset accounts and strategies for all traders.
-- `docs/architrcture.md` – high‑level architecture.
-- `docs/LLD.md` – low‑level design and call flows.
+
+---
+
+## Documentation
+
+| Doc | Description |
+|-----|--------------|
+| [docs/1_CONCEPT.md](docs/1_CONCEPT.md) | Concepts and high-level ideas |
+| [docs/2_HLD.md](docs/2_HLD.md) | High-level architecture and diagrams |
+| [docs/3_LLD.md](docs/3_LLD.md) | Low-level design and call flows |
+| [docs/4_CODEWALK.md](docs/4_CODEWALK.md) | Code flow and dependencies (build order, reading guide) |
+| [docs/5_DEMO.md](docs/5_DEMO.md) | Demo and usage walkthrough |
+| [docs/6_OBSERVABILITY.md](docs/6_OBSERVABILITY.md) | Tracing, logs, and observability (OpenAI + SQLite) |
+| [docs/developers_guide.md](docs/developers_guide.md) | Developer notes and patterns |
+| [docs/EVALS.md](docs/EVALS.md) | Evaluation ideas for agent/MCP/trading behavior |
+| [docs/GUARDRAILS.md](docs/GUARDRAILS.md) | Guardrails and production-readiness (safety, limits, ops) |
+
+See also **[AGENTS.md](AGENTS.md)** for a contributor-oriented project map and run commands.
 
 ---
 
@@ -220,5 +236,5 @@ Both processes can run concurrently: **trading_floor** drives autonomous behavio
 
 ## Further Reading
 
-- `docs/HLD.md` – architecture and diagrams.
-- `docs/LLD.md` – detailed low‑level design and call flows.
+- **Documentation** (table above): concept, architecture (HLD/LLD), code walk, demo, observability, developers guide, evals, and guardrails.
+- **[AGENTS.md](AGENTS.md)** – contributor map, where to start reading, and common run commands.

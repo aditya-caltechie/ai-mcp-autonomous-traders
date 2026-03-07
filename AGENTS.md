@@ -51,6 +51,9 @@ If you only remember one thing: **`src/` holds the runtime, `docs/` explains the
   - `src/accounts.py`, `src/market.py`, `src/database.py` – accounts, market data, and SQLite storage.
 - **MCP integration**:
   - `src/accounts_server.py`, `src/market_server.py`, `src/push_server.py`, `src/mcp_params.py`.
+- **Production readiness**:
+  - `docs/EVALS.md` – evaluation ideas for agent/MCP/trading behavior.
+  - `docs/GUARDRAILS.md` – guardrails and other production considerations.
 
 ---
 
